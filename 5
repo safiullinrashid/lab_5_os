@@ -1,0 +1,47 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+
+int main(int argc, char *argv[]) {
+    if (argc != 3) {
+        fprintf(stderr, "Usage: %s <source> <destination>\n", argv[0]);
+        return 1;
+    }
+
+    FILE *source = fopen(argv[1], "r");
+    if (source == NULL) {
+        perror("Error opening source file");
+        return 1;
+    }
+
+    FILE *destination = fopen(argv[2], "w");
+    if (destination == NULL) {
+        perror("Error opening destination file");
+        fclose(source);
+        return 1;
+    }
+
+    char ch;
+    while ((ch = fgetc(source)) != EOF) {
+        if (fputc(ch, destination) == EOF) {
+            perror("Error writing to destination file");
+            fclose(source);
+            fclose(destination);
+            return 1;
+        }
+    }
+
+    fclose(source);
+    fclose(destination);
+
+    // Copy file permissions
+    struct stat st;
+    if (stat(argv[1], &st) == 0) {
+        chmod(argv[2], st.st_mode);
+    } else {
+        perror("Error getting file permissions");
+    }
+
+    printf("File copied successfully.\n");
+    return 0;
+}
