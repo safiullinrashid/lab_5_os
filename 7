@@ -1,0 +1,142 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <time.h>
+#include <fcntl.h>
+
+#define MAX_PATH 1024
+
+// Структура для хранения информации о файле
+typedef struct {
+    char path[MAX_PATH];
+    struct stat file_stat;
+} FileInfo;
+
+// Функция для рекурсивного обхода каталога и сбора информации о файлах
+void traverse_directory(const char *dir_path, FileInfo **files, int *count) {
+    DIR *dir;
+    struct dirent *entry;
+    char full_path[MAX_PATH];
+
+    if ((dir = opendir(dir_path)) == NULL) {
+        perror("opendir");
+        return;
+    }
+
+    while ((entry = readdir(dir)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        snprintf(full_path, MAX_PATH, "%s/%s", dir_path, entry->d_name);
+
+        struct stat st;
+        if (lstat(full_path, &st) == -1) {
+            perror("lstat");
+            continue;
+        }
+
+        if (S_ISDIR(st.st_mode)) {
+            traverse_directory(full_path, files, count);
+        } else if (S_ISREG(st.st_mode)) {
+            *files = realloc(*files, (*count + 1) * sizeof(FileInfo));
+            strncpy((*files)[*count].path, full_path, MAX_PATH);
+            (*files)[*count].file_stat = st;
+            (*count)++;
+        }
+    }
+
+    closedir(dir);
+}
+
+// Функция для сравнения содержимого файлов
+int compare_files(const char *file1, const char *file2) {
+    FILE *f1 = fopen(file1, "rb");
+    FILE *f2 = fopen(file2, "rb");
+
+    if (f1 == NULL || f2 == NULL) {
+        perror("fopen");
+        return -1;
+    }
+
+    int result = 0;
+    char buf1[1024], buf2[1024];
+    size_t n1, n2;
+
+    do {
+        n1 = fread(buf1, 1, sizeof(buf1), f1);
+        n2 = fread(buf2, 1, sizeof(buf2), f2);
+
+        if (n1 != n2 || memcmp(buf1, buf2, n1) != 0) {
+            result = 1;
+            break;
+        }
+    } while (n1 > 0);
+
+    fclose(f1);
+    fclose(f2);
+
+    return result;
+}
+
+// Функция для вывода информации о файле
+void print_file_info(FILE *output, const FileInfo *file) {
+    fprintf(output, "File: %s\n", file->path);
+    fprintf(output, "Size: %ld bytes\n", file->file_stat.st_size);
+    fprintf(output, "Last modified: %s", ctime(&file->file_stat.st_mtime));
+    fprintf(output, "Permissions: %o\n", file->file_stat.st_mode & 0777);
+    fprintf(output, "Inode: %ld\n", file->file_stat.st_ino);
+    fprintf(output, "\n");
+}
+
+int main(int argc, char *argv[]) {
+    if (argc != 4) {
+        fprintf(stderr, "Usage: %s <dir1> <dir2> <output_file>\n", argv[0]);
+        return 1;
+    }
+
+    FileInfo *files1 = NULL, *files2 = NULL;
+    int count1 = 0, count2 = 0;
+
+    // Сбор информации о файлах в первом каталоге
+    traverse_directory(argv[1], &files1, &count1);
+
+    // Сбор информации о файлах во втором каталоге
+    traverse_directory(argv[2], &files2, &count2);
+
+    // Открытие файла для вывода результатов
+    FILE *output = fopen(argv[3], "w");
+    if (output == NULL) {
+        perror("fopen");
+        return 1;
+    }
+
+    // Поиск совпадающих файлов
+    for (int i = 0; i < count1; i++) {
+        for (int j = 0; j < count2; j++) {
+            if (files1[i].file_stat.st_size == files2[j].file_stat.st_size &&
+                compare_files(files1[i].path, files2[j].path) == 0) {
+                fprintf(stdout, "Match found:\n");
+                print_file_info(stdout, &files1[i]);
+                print_file_info(stdout, &files2[j]);
+
+                fprintf(output, "Match found:\n");
+                print_file_info(output, &files1[i]);
+                print_file_info(output, &files2[j]);
+            }
+        }
+    }
+
+    // Освобождение памяти
+    free(files1);
+    free(files2);
+
+    // Закрытие файла вывода
+    fclose(output);
+
+    return 0;
+}
